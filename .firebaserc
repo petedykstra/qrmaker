@@ -1,0 +1,9 @@
+{
+  "projects": {
+    "qrmaker": "qrmaker-78561",
+    "staging": "qrmaker-78561",
+    "default": "qrmaker-78561"
+  },
+  "targets": {},
+  "etags": {}
+}

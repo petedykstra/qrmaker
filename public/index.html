@@ -1,0 +1,1218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Maker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Primary CDN for QRCode library (switched to cdnjs for better reliability) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.5.3/qrcode.min.js"></script>
+    <style>
+        /* Custom Animations */
+        @keyframes blob {
+            0% { transform: translate(0px, 0px) scale(1); }
+            33% { transform: translate(30px, -50px) scale(1.1); }
+            66% { transform: translate(-20px, 20px) scale(0.9); }
+            100% { transform: translate(0px, 0px) scale(1); }
+        }
+        .animate-blob { animation: blob 7s infinite; }
+        .animation-delay-2000 { animation-delay: 2s; }
+        .animation-delay-4000 { animation-delay: 4s; }
+
+        .btn-animate {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .btn-animate:active {
+            transform: scale(0.92);
+        }
+
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+
+        /* Loading Spinner */
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #6366f1;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Drag over state */
+        .drag-over {
+            border-color: #6366f1 !important;
+            background-color: #e0e7ff !important;
+        }
+
+        /* Smooth transitions for tabs */
+        .tab-content {
+            display: none;
+            opacity: 0;
+            transition: opacity 0.3s ease-in-out;
+        }
+        .tab-content.active {
+            display: block;
+            opacity: 1;
+        }
+
+        /* Hide default native color picker styles but remain clickable */
+        .color-picker-hidden {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border-width: 0;
+        }
+
+        /* Custom scrollbar for type selector */
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans min-h-screen relative overflow-x-hidden selection:bg-indigo-100 selection:text-indigo-900">
+
+    <!-- Background Decorative Elements -->
+    <div class="fixed inset-0 z-0 overflow-hidden pointer-events-none">
+        <div class="absolute top-0 left-1/4 w-96 h-96 bg-indigo-300 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob"></div>
+        <div class="absolute top-0 right-1/4 w-96 h-96 bg-purple-300 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob animation-delay-2000"></div>
+        <div class="absolute -bottom-8 left-1/2 w-96 h-96 bg-pink-300 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob animation-delay-4000"></div>
+    </div>
+
+    <!-- Global Loading Overlay -->
+    <div id="loading-overlay" class="fixed inset-0 z-50 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center hidden">
+        <div class="loader mb-4"></div>
+        <h2 id="loading-text" class="text-xl font-semibold text-indigo-600 animate-pulse">Loading...</h2>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="fixed bottom-5 left-1/2 transform -translate-x-1/2 z-50 transition-all duration-300 translate-y-20 opacity-0 bg-gray-900 text-white px-6 py-3 rounded-full shadow-lg flex items-center gap-3">
+        <i data-lucide="check-circle" class="text-green-400 w-5 h-5"></i>
+        <span id="toast-msg">Success</span>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- MAIN APP VIEW (Creator & History)          -->
+    <!-- ========================================== -->
+    <div id="app-view" class="relative z-10 max-w-6xl mx-auto px-4 py-8 hidden flex-col min-h-screen">
+
+        <!-- Header -->
+        <header class="flex justify-between items-center mb-8 bg-white/50 backdrop-blur-md px-6 py-4 rounded-2xl shadow-sm border border-white">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-200">
+                    <i data-lucide="qr-code"></i>
+                </div>
+                <h1 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-purple-600">QR Maker</h1>
+            </div>
+            <div class="flex items-center gap-4">
+                <nav class="flex gap-2 p-1 bg-slate-200/50 rounded-xl">
+                    <button id="tab-create" class="px-5 py-2 rounded-lg font-medium text-sm transition-all bg-white text-indigo-600 shadow-sm btn-animate">Create</button>
+                    <button id="tab-history" class="px-5 py-2 rounded-lg font-medium text-sm transition-all text-slate-600 hover:text-slate-900 btn-animate">History</button>
+                </nav>
+                <button id="auth-btn" class="hidden md:flex items-center gap-2 px-4 py-2 bg-white text-indigo-600 rounded-xl font-medium shadow-sm border border-slate-200 hover:bg-slate-50 transition-colors btn-animate">
+                    <i data-lucide="log-in" class="w-4 h-4"></i>
+                    <span class="text-sm">Login</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- CREATE TAB -->
+        <main id="view-create" class="tab-content active flex-grow">
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+
+                <!-- Left Column: Controls -->
+                <div class="lg:col-span-7 space-y-6">
+
+                    <div class="glass-panel p-6 rounded-3xl shadow-sm">
+                        <!-- Input Type Selector Icons -->
+                        <h3 class="text-sm font-semibold text-slate-700 mb-4">Choose Content Type</h3>
+                        <div class="flex gap-2 overflow-x-auto hide-scrollbar pb-2 mb-6 border-b border-slate-100" id="type-selector-container">
+                            <button class="type-selector active bg-indigo-50 text-indigo-600 border-indigo-200 border shadow-sm flex flex-col items-center justify-center p-3 rounded-2xl transition-all min-w-[72px]" data-type="url">
+                                <i data-lucide="link" class="w-6 h-6"></i><span class="text-[11px] font-semibold mt-2">URL</span>
+                            </button>
+                            <button class="type-selector bg-white text-slate-500 border border-slate-200 hover:bg-slate-50 flex flex-col items-center justify-center p-3 rounded-2xl transition-all min-w-[72px]" data-type="file">
+                                <i data-lucide="file" class="w-6 h-6"></i><span class="text-[11px] font-semibold mt-2">File</span>
+                            </button>
+                            <button class="type-selector bg-white text-slate-500 border border-slate-200 hover:bg-slate-50 flex flex-col items-center justify-center p-3 rounded-2xl transition-all min-w-[72px]" data-type="image">
+                                <i data-lucide="image" class="w-6 h-6"></i><span class="text-[11px] font-semibold mt-2">Image</span>
+                            </button>
+                            <button class="type-selector bg-white text-slate-500 border border-slate-200 hover:bg-slate-50 flex flex-col items-center justify-center p-3 rounded-2xl transition-all min-w-[72px]" data-type="contact">
+                                <i data-lucide="contact" class="w-6 h-6"></i><span class="text-[11px] font-semibold mt-2">Contact</span>
+                            </button>
+                            <button class="type-selector bg-white text-slate-500 border border-slate-200 hover:bg-slate-50 flex flex-col items-center justify-center p-3 rounded-2xl transition-all min-w-[72px]" data-type="email">
+                                <i data-lucide="mail" class="w-6 h-6"></i><span class="text-[11px] font-semibold mt-2">Email</span>
+                            </button>
+                            <button class="type-selector bg-white text-slate-500 border border-slate-200 hover:bg-slate-50 flex flex-col items-center justify-center p-3 rounded-2xl transition-all min-w-[72px]" data-type="sms">
+                                <i data-lucide="message-circle" class="w-6 h-6"></i><span class="text-[11px] font-semibold mt-2">SMS</span>
+                            </button>
+                            <button class="type-selector bg-white text-slate-500 border border-slate-200 hover:bg-slate-50 flex flex-col items-center justify-center p-3 rounded-2xl transition-all min-w-[72px]" data-type="wifi">
+                                <i data-lucide="wifi" class="w-6 h-6"></i><span class="text-[11px] font-semibold mt-2">WiFi</span>
+                            </button>
+                        </div>
+
+                        <!-- FORMS CONTAINER -->
+                        <div id="forms-container">
+
+                            <!-- URL Form -->
+                            <div class="form-section block" data-form="url">
+                                <label class="block text-sm font-semibold text-slate-700 mb-2">Web URL</label>
+                                <div class="relative">
+                                    <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                        <i data-lucide="globe" class="text-slate-400 w-5 h-5"></i>
+                                    </div>
+                                    <input type="url" id="url-input" placeholder="https://example.com" class="qr-input-field w-full pl-11 pr-4 py-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition-all outline-none bg-white/80">
+                                </div>
+                                <p class="text-xs text-slate-500 mt-2 flex items-center"><i data-lucide="info" class="w-4 h-4 mr-1"></i> '#qrmaker' will be automatically appended.</p>
+                            </div>
+
+                            <!-- Upload Form (File/Image shared logic) -->
+                            <div class="form-section hidden" data-form="upload">
+                                <label id="upload-label" class="block text-sm font-semibold text-slate-700 mb-2">Upload a File</label>
+                                <div id="drop-zone" class="border-2 border-dashed border-slate-300 rounded-2xl p-8 text-center bg-slate-50/50 transition-all duration-300 hover:bg-slate-100 cursor-pointer relative">
+                                    <input type="file" id="file-upload" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
+                                    <div class="text-slate-400 mb-3 flex justify-center"><i data-lucide="cloud-upload" class="w-10 h-10"></i></div>
+                                    <h3 class="font-semibold text-slate-700 mb-1">Drag & Drop here</h3>
+                                    <p class="text-sm text-slate-500">or click to browse files</p>
+                                    <div id="selected-file-info" class="hidden mt-4 p-3 bg-indigo-50 rounded-lg text-indigo-700 text-sm flex items-center justify-center gap-2 border border-indigo-100">
+                                        <i data-lucide="file" class="w-4 h-4"></i> <span id="file-name-display" class="truncate max-w-[200px]">filename.jpg</span>
+                                    </div>
+                                </div>
+                                <button id="btn-upload-generate" class="w-full mt-4 py-3 bg-indigo-600 text-white rounded-xl font-semibold shadow-lg shadow-indigo-200 btn-animate hover:bg-indigo-700 hidden">
+                                    Upload & Generate QR
+                                </button>
+                            </div>
+
+                            <!-- Contact (vCard) Form -->
+                            <div class="form-section hidden space-y-4" data-form="contact">
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-semibold text-slate-700 mb-1">Full Name</label>
+                                        <input type="text" id="contact-name" placeholder="John Doe" class="qr-input-field w-full px-4 py-2 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none bg-white/80">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-semibold text-slate-700 mb-1">Organization</label>
+                                        <input type="text" id="contact-org" placeholder="Acme Corp" class="qr-input-field w-full px-4 py-2 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none bg-white/80">
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-semibold text-slate-700 mb-1">Phone Number</label>
+                                    <input type="tel" id="contact-phone" placeholder="+1 234 567 8900" class="qr-input-field w-full px-4 py-2 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none bg-white/80">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-semibold text-slate-700 mb-1">Email Address</label>
+                                    <input type="email" id="contact-email" placeholder="john@example.com" class="qr-input-field w-full px-4 py-2 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none bg-white/80">
+                                </div>
+                            </div>
+
+                            <!-- Email Form -->
+                            <div class="form-section hidden space-y-4" data-form="email">
+                                <div>
+                                    <label class="block text-sm font-semibold text-slate-700 mb-1">Send To</label>
+                                    <input type="email" id="email-address" placeholder="hello@example.com" class="qr-input-field w-full px-4 py-2 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none bg-white/80">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-semibold text-slate-700 mb-1">Subject</label>
+                                    <input type="text" id="email-subject" placeholder="Meeting Request" class="qr-input-field w-full px-4 py-2 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none bg-white/80">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-semibold text-slate-700 mb-1">Message</label>
+                                    <textarea id="email-body" rows="3" placeholder="Type your message here..." class="qr-input-field w-full px-4 py-2 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none bg-white/80 resize-none"></textarea>
+                                </div>
+                            </div>
+
+                            <!-- SMS Form -->
+                            <div class="form-section hidden space-y-4" data-form="sms">
+                                <div>
+                                    <label class="block text-sm font-semibold text-slate-700 mb-1">Phone Number</label>
+                                    <input type="tel" id="sms-phone" placeholder="+1 234 567 8900" class="qr-input-field w-full px-4 py-2 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none bg-white/80">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-semibold text-slate-700 mb-1">Message</label>
+                                    <textarea id="sms-message" rows="3" placeholder="Hello there!" class="qr-input-field w-full px-4 py-2 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none bg-white/80 resize-none"></textarea>
+                                </div>
+                            </div>
+
+                            <!-- WiFi Form -->
+                            <div class="form-section hidden space-y-4" data-form="wifi">
+                                <div>
+                                    <label class="block text-sm font-semibold text-slate-700 mb-1">Network Name (SSID)</label>
+                                    <input type="text" id="wifi-ssid" placeholder="MyWiFiNetwork" class="qr-input-field w-full px-4 py-2 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none bg-white/80">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-semibold text-slate-700 mb-1">Password</label>
+                                    <input type="password" id="wifi-pass" placeholder="SecretPassword123" class="qr-input-field w-full px-4 py-2 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none bg-white/80">
+                                </div>
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-semibold text-slate-700 mb-1">Encryption</label>
+                                        <select id="wifi-enc" class="qr-input-field w-full px-4 py-2 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none bg-white/80">
+                                            <option value="WPA">WPA/WPA2</option>
+                                            <option value="WEP">WEP</option>
+                                            <option value="nopass">None</option>
+                                        </select>
+                                    </div>
+                                    <div class="flex items-center mt-6">
+                                        <label class="flex items-center gap-2 cursor-pointer text-slate-700">
+                                            <input type="checkbox" id="wifi-hidden" class="qr-input-field w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500">
+                                            <span class="text-sm font-medium">Hidden Network</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+
+                        <!-- General Generate Button -->
+                        <button id="btn-generate-text" class="w-full mt-6 py-3 bg-indigo-600 text-white rounded-xl font-semibold shadow-lg shadow-indigo-200 btn-animate hover:bg-indigo-700 flex items-center justify-center gap-2 transition-all">
+                            <i data-lucide="zap" class="w-5 h-5"></i> Generate QR Code
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Right Column: Preview & Actions -->
+                <div class="lg:col-span-5 relative">
+                    <div class="sticky top-8">
+                        <div class="glass-panel p-8 rounded-3xl shadow-lg border border-white/60 flex flex-col items-center text-center">
+
+                            <h2 class="text-lg font-bold text-slate-800 mb-2">Live Preview</h2>
+                            <p class="text-xs text-slate-500 mb-6 flex items-center gap-1">
+                                <i data-lucide="palette" class="w-3 h-3"></i> Click QR to change color, background for bg color
+                            </p>
+
+                            <!-- QR Code Canvas Container -->
+                            <div class="relative group w-full flex justify-center">
+                                <div class="absolute inset-0 bg-gradient-to-r from-indigo-500 to-purple-500 rounded-2xl blur opacity-10 group-hover:opacity-30 transition duration-1000 group-hover:duration-200 -z-10 w-full scale-95"></div>
+
+                                <div id="qr-wrapper" class="relative bg-white p-6 rounded-2xl shadow-sm border border-slate-200 min-h-[250px] min-w-[250px] flex items-center justify-center cursor-pointer hover:shadow-md transition-shadow">
+                                    <div id="qr-placeholder" class="text-slate-300 flex flex-col items-center pointer-events-none">
+                                        <i data-lucide="qr-code" class="w-16 h-16 mb-2 opacity-50"></i>
+                                        <span class="text-sm">Awaiting input...</span>
+                                    </div>
+                                    <img id="qr-image" class="hidden max-w-full rounded cursor-pointer relative z-10" alt="QR Code" title="Click to change foreground color" />
+
+                                    <!-- Hidden Color Inputs triggered by wrapper/image clicks -->
+                                    <input type="color" id="color-light" value="#ffffff" class="color-picker-hidden">
+                                    <input type="color" id="color-dark" value="#000000" class="color-picker-hidden">
+                                </div>
+                            </div>
+
+                            <!-- Size Slider -->
+                            <div class="w-full mt-8 space-y-2 text-left">
+                                <div class="flex justify-between items-center px-1">
+                                    <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider">Image Size</label>
+                                    <span id="size-display" class="text-sm text-indigo-600 font-semibold bg-indigo-50 px-2 py-0.5 rounded-md">300px</span>
+                                </div>
+                                <input type="range" id="size-slider" min="100" max="600" step="50" value="300" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600">
+                            </div>
+
+                            <!-- Action Buttons -->
+                            <div class="mt-6 w-full space-y-3">
+                                <button id="btn-save" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-semibold shadow-lg shadow-indigo-200 btn-animate flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                                    <i data-lucide="download" class="w-5 h-5"></i> Download Image
+                                </button>
+                                <button id="btn-copy" class="w-full py-3 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl font-semibold shadow-sm btn-animate flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                                    <i data-lucide="copy" class="w-5 h-5"></i> Copy Link / Text
+                                </button>
+                                <button id="btn-new" class="w-full py-2 text-slate-500 hover:text-indigo-600 font-medium btn-animate mt-2 text-sm flex items-center justify-center gap-2">
+                                    <i data-lucide="refresh-cw" class="w-4 h-4"></i> Reset
+                                </button>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+
+        <!-- HISTORY TAB -->
+        <main id="view-history" class="tab-content flex-grow hidden">
+            <div class="glass-panel rounded-3xl shadow-sm p-6 min-h-[500px]">
+
+                <!-- Auth CTA for Anonymous Users -->
+                <div id="history-auth-cta" class="hidden flex-col items-center justify-center py-20 text-center h-full">
+                    <div class="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mb-4">
+                        <i data-lucide="lock" class="w-8 h-8"></i>
+                    </div>
+                    <h3 class="text-xl font-bold text-slate-800 mb-2">Login to view History</h3>
+                    <p class="text-slate-500 mb-6 max-w-md">Log in with Google to automatically save and track all the QR codes you generate.</p>
+                    <button id="btn-history-login" class="px-6 py-3 bg-indigo-600 text-white rounded-xl font-semibold shadow-md hover:bg-indigo-700 btn-animate transition-colors flex items-center gap-2">
+                        <i data-lucide="log-in" class="w-5 h-5"></i> Login with Google
+                    </button>
+                </div>
+
+                <!-- History Content -->
+                <div id="history-content" class="hidden">
+                    <div class="flex justify-between items-center mb-6 border-b border-slate-200 pb-4">
+                        <h2 class="text-xl font-bold text-slate-800 flex items-center"><i data-lucide="history" class="text-indigo-500 mr-2"></i> Your QR Code History</h2>
+                        <span class="text-sm bg-indigo-100 text-indigo-800 py-1 px-3 rounded-full font-medium" id="history-count">0 items</span>
+                    </div>
+
+                    <div id="history-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                        <!-- History items injected here -->
+                        <div id="history-empty" class="col-span-full py-20 text-center text-slate-500 flex flex-col items-center">
+                            <i data-lucide="folder-open" class="w-16 h-16 mb-4 opacity-50"></i>
+                            <p>Your history is empty.</p>
+                            <p class="text-sm mt-1">Generate some QR codes to see them here.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <footer class="py-6 text-center text-slate-400 text-sm">
+            &copy; <script>document.write(new Date().getFullYear())</script> QR Maker
+        </footer>
+    </div>
+
+
+    <!-- ========================================== -->
+    <!-- FILE VIEWER MODE (Hosted page view)        -->
+    <!-- ========================================== -->
+    <div id="file-viewer-mode" class="relative z-10 min-h-screen bg-slate-100 hidden flex-col">
+        <!-- Minimal Header -->
+        <header class="bg-white shadow-sm border-b border-slate-200 px-6 py-4 flex justify-center items-center">
+            <div class="flex items-center gap-2 cursor-pointer" onclick="window.location.hash=''; window.location.reload();">
+                <div class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white">
+                    <i data-lucide="qr-code" class="w-5 h-5"></i>
+                </div>
+                <h1 class="text-xl font-bold text-slate-800">QR Maker</h1>
+            </div>
+        </header>
+
+        <!-- Viewer Content -->
+        <main class="flex-grow flex flex-col items-center justify-center p-4">
+            <div class="max-w-3xl w-full bg-white rounded-3xl shadow-xl overflow-hidden border border-slate-100">
+
+                <!-- File Preview Area -->
+                <div id="viewer-content" class="bg-slate-50 border-b border-slate-100 min-h-[300px] flex items-center justify-center p-8 relative">
+                    <!-- Loading state -->
+                    <div id="viewer-loading" class="flex flex-col items-center text-indigo-500">
+                        <div class="loader mb-2 border-indigo-200 border-t-indigo-500"></div>
+                        <p class="text-sm font-medium">Loading asset...</p>
+                    </div>
+
+                    <!-- Content injected here -->
+                    <div id="viewer-payload" class="hidden w-full flex flex-col items-center">
+                        <!-- Image or File Icon goes here -->
+                    </div>
+                </div>
+
+                <!-- Details & Ad Space -->
+                <div class="p-6 md:p-8 flex flex-col items-center text-center bg-white">
+                    <h2 id="viewer-filename" class="text-lg font-bold text-slate-800 mb-2 truncate max-w-full">Document</h2>
+                    <p id="viewer-meta" class="text-sm text-slate-500 mb-6">Shared via QR Maker</p>
+
+                    <a id="viewer-download-btn" href="#" target="_blank" download class="px-8 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-semibold shadow-md btn-animate inline-flex items-center gap-2 mb-10 transition-colors">
+                        <i data-lucide="download" class="w-5 h-5"></i> Download / View Original
+                    </a>
+
+                    <!-- Text Advertisement Space -->
+                    <div class="w-full border-t border-slate-100 pt-6 mt-2">
+                        <div class="bg-amber-50 rounded-xl border border-amber-100 p-4 text-center max-w-lg mx-auto">
+                            <span class="text-[10px] uppercase font-bold text-amber-600 tracking-wider mb-1 block">Advertisement</span>
+                            <h4 class="font-bold text-slate-800 text-sm">Create your own smart QR Codes</h4>
+                            <p class="text-xs text-slate-600 mt-1">Want to share files easily? Use QR Maker to generate custom trackable links instantly.</p>
+                            <button onclick="window.location.hash=''; window.location.reload();" class="mt-3 text-xs font-semibold text-indigo-600 hover:underline">Get Started Free &rarr;</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <footer class="py-6 text-center text-slate-400 text-sm">
+            &copy; <script>document.write(new Date().getFullYear())</script> QR Maker
+        </footer>
+    </div>
+
+
+    <!-- ========================================== -->
+    <!-- LOGIC & SCRIPTS                            -->
+    <!-- ========================================== -->
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, getDoc, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
+
+        // Initialize Lucide Icons
+        lucide.createIcons();
+
+        // Use environment Firebase config in Canvas to ensure Authentication and Security Rules work out-of-the-box.
+        // Fallback to provided config if hosted externally.
+        let firebaseConfig;
+        if (typeof __firebase_config !== 'undefined') {
+            firebaseConfig = JSON.parse(__firebase_config);
+        } else {
+            firebaseConfig = {
+                apiKey: "AIzaSyAbGdKCoNavCzZ6UiELi_gdLzvrXSmnLEc",
+                authDomain: "qrmaker-78561.firebaseapp.com",
+                projectId: "qrmaker-78561",
+                storageBucket: "qrmaker-78561.firebasestorage.app",
+                messagingSenderId: "425010542843",
+                appId: "1:425010542843:web:81b76ba4401b8463c7185e"
+            };
+        }
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-qrmaker-app';
+        let currentUser = null;
+        let unsubscribeHistory = null;
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const storage = getStorage(app);
+        const googleProvider = new GoogleAuthProvider();
+
+        // State Variables
+        let currentQRDataUrl = null;
+        let generatedText = "";
+        let uploadedFileLink = "";
+        let selectedFile = null;
+        let qrHistory = [];
+        let localSessionId = 'session_' + Math.random().toString(36).substr(2, 9);
+        let shouldSaveHistoryOnNextGen = false;
+
+        // DOM Elements - Initialized in bootstrap to avoid null references
+        let elAppView;
+        let elFileViewer;
+        let elLoadingOverlay;
+        let elLoadingText;
+
+        // Setup Auth First (Crucial Rule 3)
+        const initAuth = async () => {
+            try {
+                // Wait for Firebase to load any existing persisted sessions (like a Google Login)
+                await auth.authStateReady();
+                if (auth.currentUser) {
+                    return; // Session successfully restored!
+                }
+
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    try {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    } catch (customTokenErr) {
+                        console.warn("Custom token failed, falling back to anonymous auth:", customTokenErr);
+                        await signInAnonymously(auth);
+                    }
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (err) {
+                console.warn("Auth error:", err);
+                showToast("Auth unavailable. Using local session.", false);
+            }
+        };
+
+        const handleGoogleLogin = async () => {
+            try {
+                showLoading("Logging in...");
+                await signInWithPopup(auth, googleProvider);
+                showToast("Successfully logged in!");
+            } catch (error) {
+                console.error("Login error:", error);
+                showToast("Login failed: " + error.message, true);
+            } finally {
+                hideLoading();
+            }
+        };
+
+        const handleLogout = async () => {
+            try {
+                showLoading("Logging out...");
+                await signOut(auth);
+                await initAuth(); // Fall back to anonymous session
+                showToast("Logged out successfully.");
+            } catch (error) {
+                console.error("Logout error:", error);
+            } finally {
+                hideLoading();
+            }
+        };
+
+        const getUserId = () => currentUser ? currentUser.uid : localSessionId;
+
+        const checkRoute = () => {
+            const hash = window.location.hash;
+            if (hash.startsWith('#file=')) {
+                renderFileViewer(hash.replace('#file=', ''));
+            } else {
+                renderAppView();
+            }
+        };
+
+        const bootstrap = async () => {
+            // Initialize DOM elements safely after DOM is loaded
+            elAppView = document.getElementById('app-view');
+            elFileViewer = document.getElementById('file-viewer-mode');
+            elLoadingOverlay = document.getElementById('loading-overlay');
+            elLoadingText = document.getElementById('loading-text');
+
+            await initAuth();
+            onAuthStateChanged(auth, (user) => {
+                currentUser = user;
+                const isAnonymous = user ? user.isAnonymous : true;
+
+                // Update UI based on Auth State
+                const authBtn = document.getElementById('auth-btn');
+                const historyCta = document.getElementById('history-auth-cta');
+                const historyContent = document.getElementById('history-content');
+
+                if (user && !isAnonymous) {
+                    // Logged in
+                    if (authBtn) authBtn.innerHTML = `<i data-lucide="log-out" class="w-4 h-4"></i><span class="text-sm font-medium">Logout</span>`;
+                    if (historyCta) { historyCta.classList.add('hidden'); historyCta.classList.remove('flex'); }
+                    if (historyContent) historyContent.classList.remove('hidden');
+
+                    if (!window.location.hash.startsWith('#file=')) {
+                        setupHistoryListener();
+                    }
+                } else {
+                    // Anonymous or logged out
+                    if (authBtn) authBtn.innerHTML = `<i data-lucide="log-in" class="w-4 h-4"></i><span class="text-sm font-medium">Login</span>`;
+                    if (historyCta) { historyCta.classList.remove('hidden'); historyCta.classList.add('flex'); }
+                    if (historyContent) historyContent.classList.add('hidden');
+
+                    if (unsubscribeHistory) {
+                        unsubscribeHistory();
+                        unsubscribeHistory = null;
+                    }
+                }
+                lucide.createIcons();
+            });
+            checkRoute();
+            setupEventListeners();
+        };
+
+        // =====================================
+        // FILE VIEWER LOGIC (Hosted Page)
+        // =====================================
+        const renderFileViewer = async (fileId) => {
+            elAppView.classList.add('hidden');
+            elFileViewer.classList.remove('hidden');
+            elFileViewer.classList.add('flex');
+
+            const viewerLoading = document.getElementById('viewer-loading');
+            const viewerPayload = document.getElementById('viewer-payload');
+            const viewerFilename = document.getElementById('viewer-filename');
+            const viewerBtn = document.getElementById('viewer-download-btn');
+
+            try {
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'files', fileId);
+                const docSnap = await getDoc(docRef);
+
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    viewerLoading.classList.add('hidden');
+                    viewerPayload.classList.remove('hidden');
+
+                    viewerFilename.textContent = data.name || 'Shared File';
+                    viewerBtn.href = data.url;
+                    viewerBtn.download = data.name || 'download'; // Added to ensure base64 urls trigger actual downloads
+
+                    if (data.type && data.type.startsWith('image/')) {
+                        viewerPayload.innerHTML = `<img src="${data.url}" class="max-w-full max-h-[400px] rounded-lg shadow-md object-contain" alt="Preview" />`;
+                    } else {
+                        viewerPayload.innerHTML = `
+                            <div class="w-32 h-32 bg-white rounded-2xl shadow-sm border border-slate-200 flex items-center justify-center text-slate-400 mb-4">
+                                <i data-lucide="file-text" class="w-16 h-16"></i>
+                            </div>
+                            <p class="text-slate-600 text-sm font-medium">Preview not available for this file type.</p>
+                        `;
+                        lucide.createIcons({root: viewerPayload});
+                    }
+                } else {
+                    throw new Error("File not found");
+                }
+            } catch (err) {
+                console.error(err);
+                viewerLoading.innerHTML = `
+                    <div class="text-red-500 mb-3"><i data-lucide="alert-circle" class="w-10 h-10"></i></div>
+                    <p class="text-slate-700 font-medium">File not found or link expired.</p>
+                `;
+                lucide.createIcons({root: viewerLoading});
+            }
+        };
+
+        // =====================================
+        // APP VIEW LOGIC (Creator Dashboard)
+        // =====================================
+        const renderAppView = () => {
+            elFileViewer.classList.add('hidden');
+            elFileViewer.classList.remove('flex');
+            elAppView.classList.remove('hidden');
+            elAppView.classList.add('flex');
+        };
+
+        const setupEventListeners = () => {
+            // Auth Buttons
+            const authBtn = document.getElementById('auth-btn');
+            const historyLoginBtn = document.getElementById('btn-history-login');
+
+            if (authBtn) {
+                authBtn.addEventListener('click', () => {
+                    if (currentUser && !currentUser.isAnonymous) {
+                        handleLogout();
+                    } else {
+                        handleGoogleLogin();
+                    }
+                });
+            }
+            if (historyLoginBtn) {
+                historyLoginBtn.addEventListener('click', handleGoogleLogin);
+            }
+
+            // Tabs Navigation
+            const tabCreateBtn = document.getElementById('tab-create');
+            const tabHistoryBtn = document.getElementById('tab-history');
+            const viewCreate = document.getElementById('view-create');
+            const viewHistory = document.getElementById('view-history');
+
+            const switchTab = (activeTab) => {
+                if (activeTab === 'create') {
+                    tabCreateBtn.classList.add('bg-white', 'text-indigo-600', 'shadow-sm');
+                    tabCreateBtn.classList.remove('text-slate-600', 'hover:text-slate-900', 'bg-transparent');
+                    tabHistoryBtn.classList.remove('bg-white', 'text-indigo-600', 'shadow-sm');
+                    tabHistoryBtn.classList.add('text-slate-600', 'hover:text-slate-900', 'bg-transparent');
+                    viewCreate.classList.add('active');
+                    viewHistory.classList.remove('active');
+                    setTimeout(() => { viewCreate.style.display = 'block'; viewHistory.style.display = 'none'; }, 10);
+                } else {
+                    tabHistoryBtn.classList.add('bg-white', 'text-indigo-600', 'shadow-sm');
+                    tabHistoryBtn.classList.remove('text-slate-600', 'hover:text-slate-900', 'bg-transparent');
+                    tabCreateBtn.classList.remove('bg-white', 'text-indigo-600', 'shadow-sm');
+                    tabCreateBtn.classList.add('text-slate-600', 'hover:text-slate-900', 'bg-transparent');
+                    viewHistory.classList.add('active');
+                    viewCreate.classList.remove('active');
+                    setTimeout(() => { viewHistory.style.display = 'block'; viewCreate.style.display = 'none'; }, 10);
+                }
+            };
+            tabCreateBtn.addEventListener('click', () => switchTab('create'));
+            tabHistoryBtn.addEventListener('click', () => switchTab('history'));
+
+            // Type Selector Logic
+            const typeBtns = document.querySelectorAll('.type-selector');
+            typeBtns.forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    // Update active button styling
+                    typeBtns.forEach(b => {
+                        b.classList.remove('bg-indigo-50', 'text-indigo-600', 'border-indigo-200', 'shadow-sm', 'active');
+                        b.classList.add('bg-white', 'text-slate-500', 'border-slate-200', 'hover:bg-slate-50');
+                    });
+                    const target = e.currentTarget;
+                    target.classList.remove('bg-white', 'text-slate-500', 'border-slate-200', 'hover:bg-slate-50');
+                    target.classList.add('bg-indigo-50', 'text-indigo-600', 'border-indigo-200', 'shadow-sm', 'active');
+
+                    const type = target.dataset.type;
+
+                    // Show corresponding form
+                    document.querySelectorAll('.form-section').forEach(sec => sec.classList.add('hidden'));
+
+                    if(type === 'file' || type === 'image') {
+                        document.querySelector('.form-section[data-form="upload"]').classList.remove('hidden');
+                        document.getElementById('upload-label').textContent = type === 'image' ? 'Upload an Image' : 'Upload a File';
+                        document.getElementById('file-upload').accept = type === 'image' ? 'image/*' : '*';
+                        document.getElementById('btn-generate-text').classList.add('hidden');
+                    } else {
+                        const targetForm = document.querySelector(`.form-section[data-form="${type}"]`);
+                        if(targetForm) targetForm.classList.remove('hidden');
+                        document.getElementById('btn-generate-text').classList.remove('hidden');
+                    }
+
+                    resetGenerator();
+                });
+            });
+
+            // Listen to all input fields to trigger QR generation
+            document.querySelectorAll('.qr-input-field').forEach(input => {
+                input.addEventListener('input', debounceGenerateQR);
+            });
+
+            // Generate button trigger for all text-based formats
+            document.getElementById('btn-generate-text').addEventListener('click', () => {
+                if (!getQRText()) {
+                    showToast("Please fill in the required fields first.", true);
+                    return;
+                }
+                shouldSaveHistoryOnNextGen = true;
+                debounceGenerateQR();
+                showToast("Generating QR Code...");
+            });
+
+            // Color Interactions (Click QR / Canvas to edit color)
+            const qrWrapper = document.getElementById('qr-wrapper');
+            const qrImage = document.getElementById('qr-image');
+            const colorDark = document.getElementById('color-dark');
+            const colorLight = document.getElementById('color-light');
+
+            qrWrapper.addEventListener('click', (e) => {
+                if (e.target === qrImage) {
+                    colorDark.click(); // Edit Foreground
+                } else {
+                    colorLight.click(); // Edit Background
+                }
+            });
+
+            colorDark.addEventListener('input', debounceGenerateQR);
+            colorLight.addEventListener('input', debounceGenerateQR);
+
+            // Size Slider
+            const sizeSlider = document.getElementById('size-slider');
+            const sizeDisplay = document.getElementById('size-display');
+            sizeSlider.addEventListener('input', (e) => {
+                sizeDisplay.textContent = e.target.value + 'px';
+                debounceGenerateQR();
+            });
+
+            // Drag and Drop File Upload
+            const dropZone = document.getElementById('drop-zone');
+            const fileInput = document.getElementById('file-upload');
+            const fileDisplay = document.getElementById('selected-file-info');
+            const fileNameDisplay = document.getElementById('file-name-display');
+            const btnUploadGenerate = document.getElementById('btn-upload-generate');
+
+            const handleFile = (file) => {
+                if(file) {
+                    selectedFile = file;
+                    fileNameDisplay.textContent = file.name;
+                    fileDisplay.classList.remove('hidden');
+                    btnUploadGenerate.classList.remove('hidden');
+                }
+            };
+
+            dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+            dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault(); dropZone.classList.remove('drag-over');
+                if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
+            });
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) handleFile(e.target.files[0]);
+            });
+
+            // Upload & Generate Action
+            btnUploadGenerate.addEventListener('click', async () => {
+                if(!selectedFile) return;
+
+                if (!currentUser) {
+                    showToast("Upload failed: Authentication is required.", true);
+                    return;
+                }
+
+                // General protection against massive files
+                if (selectedFile.size > 5 * 1024 * 1024) {
+                    showToast("File is too large. Maximum size is 5MB.", true);
+                    return;
+                }
+
+                showLoading("Uploading & Generating...");
+                try {
+                    const uid = currentUser.uid;
+                    const safeName = selectedFile.name.replace(/[^a-zA-Z0-9.]/g, '');
+                    let finalUrl = "";
+
+                    try {
+                        // 1. Try uploading to Firebase Storage first
+                        // Using a highly permissive rule path assumption, but if it fails we catch it.
+                        const filePath = `artifacts/${appId}/public/data/${Date.now()}_${safeName}`;
+                        const storageReference = ref(storage, filePath);
+                        const metadata = { contentType: selectedFile.type || 'application/octet-stream' };
+                        await uploadBytes(storageReference, selectedFile, metadata);
+                        finalUrl = await getDownloadURL(storageReference);
+                    } catch (storageErr) {
+                        console.warn("Storage upload restricted by rules. Falling back to inline Base64 storage:", storageErr);
+
+                        // 2. Fallback to Firestore Base64 if Storage rules block it
+                        if (selectedFile.size > 800 * 1024) {
+                            throw new Error("Storage is restricted in this environment. The Base64 database fallback requires files to be under 800KB.");
+                        }
+
+                        finalUrl = await new Promise((resolve, reject) => {
+                            const reader = new FileReader();
+                            reader.onload = () => resolve(reader.result);
+                            reader.onerror = () => reject(new Error("Failed to read file"));
+                            reader.readAsDataURL(selectedFile);
+                        });
+                    }
+
+                    // 3. Save the resulting public link (Storage URL or Base64 string) to Firestore
+                    const fileDocData = {
+                        url: finalUrl,
+                        name: selectedFile.name,
+                        type: selectedFile.type || 'unknown',
+                        owner: uid,
+                        createdAt: Date.now()
+                    };
+                    const filesCollection = collection(db, 'artifacts', appId, 'public', 'data', 'files');
+                    const fileDocRef = await addDoc(filesCollection, fileDocData);
+
+                    // 4. Update the UI
+                    uploadedFileLink = `https://qrmaker.com/${fileDocRef.id}`;
+                    shouldSaveHistoryOnNextGen = true;
+                    debounceGenerateQR();
+
+                    showToast("File uploaded and QR generated!");
+                    btnUploadGenerate.classList.add('hidden');
+                } catch (err) {
+                    console.error("Upload error:", err);
+                    showToast("Upload failed: " + err.message, true);
+                } finally {
+                    hideLoading();
+                }
+            });
+
+            // Action Buttons
+            document.getElementById('btn-save').addEventListener('click', async () => {
+                if (!currentQRDataUrl || !generatedText) return;
+
+                const a = document.createElement('a');
+                a.href = currentQRDataUrl;
+                a.download = `QR_${Date.now()}.png`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                showToast("Image Downloaded!");
+            });
+
+            document.getElementById('btn-copy').addEventListener('click', () => {
+                if (!generatedText) return;
+
+                // Fallback to copying the QR code content (URL/Text) due to iframe image copy restrictions
+                try {
+                    const textArea = document.createElement("textarea");
+                    textArea.value = generatedText;
+
+                    // Prevent scrolling to bottom
+                    textArea.style.top = "0";
+                    textArea.style.left = "0";
+                    textArea.style.position = "fixed";
+
+                    document.body.appendChild(textArea);
+                    textArea.focus();
+                    textArea.select();
+
+                    const successful = document.execCommand('copy');
+                    document.body.removeChild(textArea);
+
+                    if (successful) {
+                        showToast("Link/Text copied to clipboard!");
+                    } else {
+                        throw new Error("execCommand failed");
+                    }
+                } catch (err) {
+                    console.error("Copy error:", err);
+                    showToast("Copy restricted by browser.", true);
+                }
+            });
+
+            document.getElementById('btn-new').addEventListener('click', () => {
+                document.querySelectorAll('.qr-input-field').forEach(inp => {
+                    if(inp.type === 'checkbox') inp.checked = false;
+                    else if(inp.tagName === 'SELECT') inp.selectedIndex = 0;
+                    else inp.value = '';
+                });
+                resetGenerator();
+            });
+        };
+
+        // QR Text Formulation based on type
+        const getQRText = () => {
+            const typeBtn = document.querySelector('.type-selector.active');
+            if(!typeBtn) return "";
+            const type = typeBtn.dataset.type;
+            let txt = '';
+
+            if (type === 'url') {
+                txt = document.getElementById('url-input').value.trim();
+                if(txt && !txt.includes('#qrmaker')) {
+                    if(!txt.startsWith('http://') && !txt.startsWith('https://')) txt = 'https://' + txt;
+                    txt += (txt.includes('#') ? '&' : '#') + 'qrmaker';
+                }
+            } else if (type === 'contact') {
+                const n = document.getElementById('contact-name').value.trim();
+                const o = document.getElementById('contact-org').value.trim();
+                const p = document.getElementById('contact-phone').value.trim();
+                const e = document.getElementById('contact-email').value.trim();
+                if (n || p || e || o) {
+                    txt = `BEGIN:VCARD\nVERSION:3.0\nN:${n}\nFN:${n}\nORG:${o}\nTEL:${p}\nEMAIL:${e}\nEND:VCARD`;
+                }
+            } else if (type === 'email') {
+                const e = document.getElementById('email-address').value.trim();
+                const s = document.getElementById('email-subject').value.trim();
+                const b = document.getElementById('email-body').value.trim();
+                if (e) txt = `mailto:${e}?subject=${encodeURIComponent(s)}&body=${encodeURIComponent(b)}`;
+            } else if (type === 'sms') {
+                const p = document.getElementById('sms-phone').value.trim();
+                const m = document.getElementById('sms-message').value.trim();
+                if (p) txt = `smsto:${p}:${m}`;
+            } else if (type === 'wifi') {
+                const s = document.getElementById('wifi-ssid').value.trim();
+                const p = document.getElementById('wifi-pass').value.trim();
+                const e = document.getElementById('wifi-enc').value;
+                const h = document.getElementById('wifi-hidden').checked;
+                if (s) txt = `WIFI:T:${e};S:${s};P:${p};H:${h};;`;
+            } else if (type === 'file' || type === 'image') {
+                txt = uploadedFileLink;
+            }
+            return txt;
+        };
+
+        // QR Generation Logic
+        let timeoutId;
+        const debounceGenerateQR = () => {
+            clearTimeout(timeoutId);
+            timeoutId = setTimeout(() => {
+                const text = getQRText();
+                if(text) {
+                    generatedText = text;
+                    updateQRCodeImage();
+                } else {
+                    clearQR();
+                }
+            }, 300);
+        };
+
+        const updateQRCodeImage = async () => {
+            if(!generatedText) return;
+
+            const qrWrapper = document.getElementById('qr-wrapper');
+            const placeholder = document.getElementById('qr-placeholder');
+            const imgEl = document.getElementById('qr-image');
+
+            const colorD = document.getElementById('color-dark').value;
+            const colorL = document.getElementById('color-light').value;
+            const size = parseInt(document.getElementById('size-slider').value);
+
+            try {
+                // Ensure QRCode library is loaded (fallback to dynamic ESM import if CDN script failed)
+                let QRCodeLib = window.QRCode;
+                if (!QRCodeLib) {
+                    try {
+                        const module = await import("https://esm.sh/qrcode@1.5.3");
+                        QRCodeLib = module.default || module;
+                        window.QRCode = QRCodeLib; // Cache it
+                    } catch (importErr) {
+                        throw new Error("QR Code library is blocked by your browser. Please disable adblockers or refresh.");
+                    }
+                }
+
+                qrWrapper.classList.remove('scale-100');
+                qrWrapper.classList.add('scale-95', 'opacity-50');
+
+                // Generate via Canvas instead of DataURL to allow logo overlay
+                const canvas = document.createElement('canvas');
+                await QRCodeLib.toCanvas(canvas, generatedText, {
+                    width: size,
+                    margin: 2,
+                    color: { dark: colorD, light: colorL },
+                    errorCorrectionLevel: 'H' // High error correction required for center logo
+                });
+
+                // Check if we need to embed an image thumbnail
+                const typeBtn = document.querySelector('.type-selector.active');
+                if (typeBtn && typeBtn.dataset.type === 'image' && selectedFile && selectedFile.type.startsWith('image/')) {
+                    const ctx = canvas.getContext('2d');
+                    const img = new Image();
+                    img.src = URL.createObjectURL(selectedFile);
+                    await new Promise((resolve) => {
+                        img.onload = resolve;
+                        img.onerror = resolve; // Continue even if image fails to load
+                    });
+
+                    const logoSize = size * 0.25; // Scale logo to 25% of the total size
+                    const center = (size - logoSize) / 2;
+
+                    // Add a small background border for contrast
+                    ctx.fillStyle = colorL;
+                    ctx.fillRect(center - 4, center - 4, logoSize + 8, logoSize + 8);
+
+                    ctx.drawImage(img, center, center, logoSize, logoSize);
+                    URL.revokeObjectURL(img.src);
+                }
+
+                const dataUrl = canvas.toDataURL("image/png");
+
+                currentQRDataUrl = dataUrl;
+                imgEl.src = dataUrl;
+
+                placeholder.classList.add('hidden');
+                imgEl.classList.remove('hidden');
+
+                document.getElementById('btn-save').disabled = false;
+                document.getElementById('btn-copy').disabled = false;
+
+                // Auto-save to history on explicit generation
+                if (shouldSaveHistoryOnNextGen) {
+                    shouldSaveHistoryOnNextGen = false;
+                    if (currentUser && !currentUser.isAnonymous) {
+                        const type = document.querySelector('.type-selector.active').dataset.type;
+                        let titleStr = type.toUpperCase() + ' Code';
+                        if(type === 'url') titleStr = document.getElementById('url-input').value;
+                        if(type === 'file' || type === 'image') titleStr = selectedFile ? selectedFile.name : 'Uploaded File';
+
+                        try {
+                            const historyRef = collection(db, 'artifacts', appId, 'users', currentUser.uid, 'history');
+                            await addDoc(historyRef, {
+                                link: generatedText,
+                                title: titleStr,
+                                type: type,
+                                qrData: currentQRDataUrl,
+                                createdAt: Date.now()
+                            });
+                        } catch(e) { console.error("History auto-save error", e); }
+                    }
+                }
+
+                setTimeout(() => {
+                    qrWrapper.classList.remove('scale-95', 'opacity-50');
+                    qrWrapper.classList.add('scale-100', 'transition-transform', 'duration-300');
+                }, 50);
+
+            } catch (err) {
+                console.error("QR Generation Error", err);
+                showToast("Failed to generate QR code", true);
+            }
+        };
+
+        const clearQR = () => {
+            currentQRDataUrl = null;
+            generatedText = "";
+            document.getElementById('qr-placeholder').classList.remove('hidden');
+            document.getElementById('qr-image').classList.add('hidden');
+            document.getElementById('btn-save').disabled = true;
+            document.getElementById('btn-copy').disabled = true;
+        };
+
+        const resetGenerator = () => {
+            clearQR();
+            selectedFile = null;
+            uploadedFileLink = "";
+            document.getElementById('file-upload').value = '';
+            document.getElementById('selected-file-info').classList.add('hidden');
+            document.getElementById('btn-upload-generate').classList.add('hidden');
+        };
+
+        // =====================================
+        // HISTORY LISTENER & RENDERING
+        // =====================================
+        const setupHistoryListener = () => {
+            if (!currentUser) return;
+            const uid = currentUser.uid;
+            const historyRef = collection(db, 'artifacts', appId, 'users', uid, 'history');
+            unsubscribeHistory = onSnapshot(historyRef, (snapshot) => {
+                const items = [];
+                snapshot.forEach(doc => items.push({ id: doc.id, ...doc.data() }));
+                items.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+                qrHistory = items;
+                renderHistory();
+            }, (error) => console.error("History fetch error", error));
+        };
+
+        const renderHistory = () => {
+            const grid = document.getElementById('history-grid');
+            const empty = document.getElementById('history-empty');
+            const count = document.getElementById('history-count');
+            count.textContent = `${qrHistory.length} items`;
+
+            document.querySelectorAll('.history-card').forEach(el => el.remove());
+
+            if (qrHistory.length === 0) {
+                empty.classList.remove('hidden');
+            } else {
+                empty.classList.add('hidden');
+
+                qrHistory.forEach(item => {
+                    const dateStr = new Date(item.createdAt).toLocaleDateString();
+
+                    // Icon mapping for history
+                    let iconName = 'link';
+                    if(item.type === 'file') iconName = 'file';
+                    if(item.type === 'image') iconName = 'image';
+                    if(item.type === 'contact') iconName = 'contact';
+                    if(item.type === 'email') iconName = 'mail';
+                    if(item.type === 'sms') iconName = 'message-circle';
+                    if(item.type === 'wifi') iconName = 'wifi';
+
+                    const card = document.createElement('div');
+                    card.className = 'history-card glass-panel rounded-2xl p-4 flex flex-col items-center shadow-sm border border-white hover:shadow-md transition-shadow cursor-pointer group';
+                    card.innerHTML = `
+                        <div class="bg-white p-2 rounded-xl border border-slate-100 mb-3 w-full flex justify-center group-hover:scale-105 transition-transform">
+                            <img src="${item.qrData}" alt="QR" class="w-32 h-32 object-contain" />
+                        </div>
+                        <div class="w-full text-left">
+                            <div class="flex items-center gap-2 mb-1">
+                                <i data-lucide="${iconName}" class="w-4 h-4 text-indigo-500"></i>
+                                <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">${item.type}</span>
+                                <span class="text-xs text-slate-400 ml-auto">${dateStr}</span>
+                            </div>
+                            <h4 class="font-semibold text-slate-800 text-sm truncate w-full" title="${item.title}">${item.title || 'Untitled'}</h4>
+                        </div>
+                        <div class="w-full flex gap-2 mt-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                             <a href="${item.qrData}" download="QR_History.png" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs py-2 rounded-lg text-center font-medium transition-colors flex items-center justify-center gap-1" onclick="event.stopPropagation()">
+                                <i data-lucide="download" class="w-3 h-3"></i> DL
+                             </a>
+                             <a href="${item.link.startsWith('http') ? item.link : '#'}" target="_blank" class="flex-1 ${item.link.startsWith('http') ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700' : 'bg-slate-50 text-slate-400 cursor-not-allowed'} text-xs py-2 rounded-lg text-center font-medium transition-colors flex items-center justify-center gap-1" onclick="event.stopPropagation()">
+                                <i data-lucide="external-link" class="w-3 h-3"></i> ${item.link.startsWith('http') ? 'Go' : 'Data'}
+                             </a>
+                        </div>
+                    `;
+                    grid.appendChild(card);
+                });
+                lucide.createIcons({root: grid});
+            }
+        };
+
+        // =====================================
+        // HELPERS
+        // =====================================
+        const showLoading = (text) => { elLoadingText.textContent = text; elLoadingOverlay.classList.remove('hidden'); };
+        const hideLoading = () => { elLoadingOverlay.classList.add('hidden'); };
+
+        const showToast = (message, isError = false) => {
+            const toast = document.getElementById('toast');
+            const msg = document.getElementById('toast-msg');
+            const icon = toast.querySelector('svg');
+
+            msg.textContent = message;
+
+            if(isError) {
+                icon.innerHTML = '<path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>';
+                icon.classList.remove('text-green-400');
+                icon.classList.add('text-red-400');
+            } else {
+                icon.innerHTML = '<path d="M22 11.08V12a10 10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/>';
+                icon.classList.add('text-green-400');
+                icon.classList.remove('text-red-400');
+            }
+
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            toast.classList.add('-translate-y-0', 'opacity-100');
+
+            setTimeout(() => {
+                toast.classList.remove('-translate-y-0', 'opacity-100');
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 3000);
+        };
+
+        window.addEventListener('DOMContentLoaded', bootstrap);
+
+    </script>
+</body>
+</html>
